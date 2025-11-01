@@ -1,0 +1,55 @@
+generator client { 
+  provider = "prisma-client-js" 
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  createdAt DateTime @default(now())
+  jobs      Job[]
+  videos    Video[]
+}
+
+model Video {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  original   String
+  durationMs Int?
+  createdAt  DateTime @default(now())
+  jobs       Job[]
+}
+
+enum JobType   { TRANSCRIBE AUTOCUT TRANSLATE RENDER }
+enum JobStatus { QUEUED RUNNING SUCCEEDED FAILED }
+
+model Job {
+  id         String    @id @default(cuid())
+  type       JobType
+  status     JobStatus @default(QUEUED)
+  progress   Int       @default(0)
+  error      String?
+  videoId    String
+  video      Video     @relation(fields: [videoId], references: [id])
+  metaJson   Json?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model SubtitleSegment {
+  id        String   @id @default(cuid())
+  videoId   String
+  video     Video    @relation(fields: [videoId], references: [id])
+  startMs   Int
+  endMs     Int
+  textSrc   String
+  textZh    String?
+  textEn    String?
+  speaker   String?
+  createdAt DateTime @default(now())
+}
