@@ -7,10 +7,11 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "worker": "tsx src/worker/videoWorker.ts",
+    "worker": "node src/worker/videoWorker.js",
     "lint": "eslint",
     "prisma:gen": "prisma generate",
-    "prisma:push": "prisma db push"
+    "prisma:push": "prisma db push",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.18.0",
