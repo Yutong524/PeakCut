@@ -25,8 +25,19 @@ model Video {
   jobs       Job[]
 }
 
-enum JobType   { TRANSCRIBE AUTOCUT TRANSLATE RENDER }
-enum JobStatus { QUEUED RUNNING SUCCEEDED FAILED }
+enum JobType {
+  TRANSCRIBE
+  AUTOCUT
+  TRANSLATE
+  RENDER
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
 
 model Job {
   id         String    @id @default(cuid())
