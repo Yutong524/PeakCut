@@ -1,50 +1,102 @@
 import { Worker } from 'bullmq';
 import { prisma } from '../lib/db.js';
+import { transcribeLocal } from '../lib/ai_local.js';
 
 const connection = { url: process.env.REDIS_URL };
 
 const w = new Worker('video-jobs', async (job) => {
     const { videoId, type } = job.data;
 
-    await prisma.job.update({ where: { id: String(job.id) }, data: { status: 'RUNNING' } });
-
-    const simulate = async (steps = 8) => {
-        for (let i = 1; i <= steps; i++) {
-            await new Promise(r => setTimeout(r, 400));
-            await prisma.job.update({
-                where: { id: String(job.id) },
-                data: { progress: Math.min(99, Math.floor((i / steps) * 98)) }
-            });
+    await prisma.job.update({
+        where: { id: job.id },
+        data: {
+            status: 'RUNNING',
+            progress: 1
         }
-    };
+    });
 
     if (type === 'TRANSCRIBE') {
-        await simulate();
-        await prisma.subtitleSegment.createMany({
-            data: [
-                { videoId, startMs: 0, endMs: 1800, textSrc: 'Hey folks, welcome back!' },
-                { videoId, startMs: 1800, endMs: 4200, textSrc: 'Today we test the new build.' },
-                { videoId, startMs: 4200, endMs: 7000, textSrc: "Let's clip the highlights." }
-            ]
-        });
-    }
+        try {
+            const video = await prisma.video.findUnique({ where: { id: videoId } });
+            if (!video?.original) throw new Error('Video not found or no original file');
 
-    if (type === 'AUTOCUT') await simulate();
-
-    if (type === 'TRANSLATE') {
-        await simulate();
-        const segs = await prisma.subtitleSegment.findMany({ where: { videoId } });
-        for (const s of segs) {
-            await prisma.subtitleSegment.update({
-                where: { id: s.id },
-                data: { textEn: s.textSrc, textZh: '占位翻译：' + s.textSrc }
+            await prisma.job.update({
+                where: {
+                    id: job.id
+                },
+                data: {
+                    progress: 5
+                }
             });
+
+            const { text, segments } = await transcribeLocal(video.original);
+
+            await prisma.subtitleSegment.deleteMany({ where: { videoId } });
+
+            if (segments?.length) {
+                const rows = segments.map(s => ({
+                    videoId,
+                    startMs: Math.max(0, Math.floor((s.start || 0) * 1000)),
+                    endMs: Math.max(0, Math.floor((s.end || 0) * 1000)),
+                    textSrc: s.text || ''
+                }));
+
+                const chunk = 200;
+                for (let i = 0; i < rows.length; i += chunk) {
+                    await prisma.subtitleSegment.createMany({ data: rows.slice(i, i + chunk) });
+                    await prisma.job.update({
+                        where: { id: job.id },
+                        data: { progress: Math.min(95, 5 + Math.floor((i / rows.length) * 85)) }
+                    });
+                }
+            } else {
+                await prisma.subtitleSegment.create({
+                    data: {
+                        videoId,
+                        startMs: 0,
+                        endMs: 0,
+                        textSrc: text || ''
+                    }
+                });
+                await prisma.job.update({
+                    where: {
+                        id: job.id
+                    },
+                    data: {
+                        progress: 95
+                    }
+                });
+            }
+
+            await prisma.job.update({
+                where: { id: job.id },
+                data: {
+                    status: 'SUCCEEDED',
+                    progress: 100,
+                    error: null
+                }
+            });
+        } catch (err) {
+            console.error('TRANSCRIBE (local) failed:', err);
+            await prisma.job.update({
+                where: { id: job.id },
+                data: {
+                    status: 'FAILED',
+                    error: String(err?.message || err)
+                }
+            });
+            throw err;
         }
+        return;
     }
 
-    if (type === 'RENDER') await simulate();
-
-    await prisma.job.update({ where: { id: String(job.id) }, data: { progress: 100, status: 'SUCCEEDED' } });
+    await prisma.job.update({
+        where: { id: job.id },
+        data: {
+            status: 'SUCCEEDED',
+            progress: 100
+        }
+    });
 }, { connection });
 
 w.on('completed', (job) => console.log('Completed', job.name, job.id));
