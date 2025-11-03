@@ -4,6 +4,8 @@ import { useSearchParams } from 'next/navigation';
 import EditorShell from '@/components/editor/EditorShell';
 import Player from '@/components/editor/Player';
 import Timeline from '@/components/editor/Timeline';
+import SegmentsList from '@/components/editor/SegmentsList';
+import Toolbar from '@/components/editor/ToolBar';
 import { clamp } from '@/lib/time';
 
 async function fetchJSON(url, opt) {
@@ -48,11 +50,9 @@ export default function EditorPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(patch),
             });
-            toast('Saved');
         } catch (e) {
             console.error(e);
             setSegments(prev);
-            toast('Save failed');
         }
     }, [segments]);
 
@@ -62,11 +62,9 @@ export default function EditorPage() {
         setSegments(next);
         try {
             await fetchJSON(`/api/editor/segments/${id}`, { method: 'DELETE' });
-            toast('Deleted');
         } catch (e) {
             console.error(e);
             setSegments(prev);
-            toast('Delete failed');
         }
     }, [segments]);
 
@@ -83,10 +81,8 @@ export default function EditorPage() {
             });
             setSegments(s => [...s, data.segment]);
             setActive(data.segment.id);
-            toast('Segment added');
         } catch (e) {
             console.error(e);
-            toast('Add failed');
         }
     }, [videoId, currentMs, duration]);
 
@@ -95,12 +91,7 @@ export default function EditorPage() {
         const splitAt = clamp(ms, s.startMs + 50, s.endMs - 50);
         try {
             await saveOne(id, { endMs: splitAt });
-            const body = {
-                videoId: s.videoId,
-                startMs: splitAt,
-                endMs: s.endMs,
-                textSrc: s.textSrc
-            };
+            const body = { videoId: s.videoId, startMs: splitAt, endMs: s.endMs, textSrc: s.textSrc };
             const data = await fetchJSON(`/api/editor/segments`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
             });
@@ -109,10 +100,8 @@ export default function EditorPage() {
                 return [...next, data.segment];
             });
             setActive(data.segment.id);
-            toast('Split success');
         } catch (e) {
             console.error(e);
-            toast('Split failed');
         }
     }, [segments, saveOne]);
 
@@ -123,16 +112,11 @@ export default function EditorPage() {
         const A = sorted[aIdx], B = sorted[aIdx + 1];
 
         try {
-            await saveOne(A.id, {
-                endMs: Math.max(A.endMs, B.endMs),
-                textSrc: (A.textSrc || '') + ' ' + (B.textSrc || '')
-            });
+            await saveOne(A.id, { endMs: Math.max(A.endMs, B.endMs), textSrc: (A.textSrc || '') + ' ' + (B.textSrc || '') });
             await deleteOne(B.id);
             setActive(A.id);
-            toast('Merge success');
         } catch (e) {
             console.error(e);
-            toast('Merge failed');
         }
     }, [segments, saveOne, deleteOne]);
 
@@ -140,16 +124,10 @@ export default function EditorPage() {
         try {
             await Promise.all(segments.map(s => fetch(`/api/editor/segments/${s.id}`, {
                 method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    startMs: s.startMs,
-                    endMs: s.endMs,
-                    textSrc: s.textSrc
-                })
+                body: JSON.stringify({ startMs: s.startMs, endMs: s.endMs, textSrc: s.textSrc })
             })));
-            toast('All saved');
         } catch (e) {
             console.error(e);
-            toast('Some failed');
         }
     }, [segments]);
 
@@ -169,6 +147,7 @@ export default function EditorPage() {
 
             if (e.key === 'ArrowLeft') { e.preventDefault(); setCurrentMs(ms => Math.max(0, ms - 100)); }
             if (e.key === 'ArrowRight') { e.preventDefault(); setCurrentMs(ms => ms + 100); }
+
             if (e.key.toLowerCase() === 's' && active) {
                 const s = segments.find(x => x.id === active); if (!s) return;
                 const cut = clamp(currentMs, s.startMs + 50, s.endMs - 50);
@@ -186,6 +165,7 @@ export default function EditorPage() {
 
     return (
         <div className="p-4">
+            <Toolbar onAddAtPlayhead={addAtPlayhead} onSaveAll={saveAll} srtHref={srtHref} />
             <EditorShell
                 children={
                     <>
@@ -202,6 +182,18 @@ export default function EditorPage() {
                             onSeek={(ms) => setCurrentMs(ms)}
                         />
                     </>
+                }
+                right={
+                    <SegmentsList
+                        segments={segments}
+                        activeId={active}
+                        onFocusRow={(s) => { setActive(s.id); setCurrentMs(s.startMs); }}
+                        onChangeRow={(id, patch) => saveOne(id, patch)}
+                        onDeleteRow={(id) => deleteOne(id)}
+                        onSplitRow={(id, ms) => splitRow(id, ms)}
+                        onMergeRow={(id) => mergeRow(id)}
+                        onSeek={(ms) => setCurrentMs(ms)}
+                    />
                 }
             />
         </div>
