@@ -20,6 +20,7 @@
     "execa": "^9.6.0",
     "ffmpeg-static": "^5.2.0",
     "formdata-node": "^6.0.3",
+    "jszip": "^3.10.1",
     "next": "16.0.1",
     "node-wav": "^0.0.2",
     "react": "19.2.0",

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import BatchExportDialog from '@/components/editor/BatchExportDialog';
 
 const IconUpload = (props) => (
   <svg width="18" height="18" viewBox="0 0 24 24" {...props}>
@@ -31,6 +32,7 @@ export default function HomePage() {
   const [uploading, setUploading] = useState(false);
   const [jobs, setJobs] = useState([]);
   const timerRef = useRef(null);
+  const [batchOpen, setBatchOpen] = useState(false);
 
   const refresh = async () => {
     const res = await fetch('/api/jobs', { cache: 'no-store' });
@@ -119,6 +121,11 @@ export default function HomePage() {
             aria-disabled={!file || uploading}
             title="Start processing"
           >
+            <button onClick={() => setBatchOpen(true)}
+              className="px-3 py-2 rounded-md border border-[#345b2f] bg-[#101810] hover:bg-[#132013] text-[#caff6b] text-sm">
+              Batch Export…
+            </button>
+
             <span className="dot" style={{ width: 8, height: 8, borderRadius: 9999 }} />
             <IconUpload style={{ color: 'var(--acid-300)' }} />
             {uploading ? 'Uploading…' : 'Start'}
@@ -179,9 +186,9 @@ export default function HomePage() {
                           <div className="flex items-center justify-between">
                             <div className="text-sm">{j.type}</div>
                             <span className={`badge ${j.status === 'SUCCEEDED' ? 'badge-ok'
-                                : j.status === 'FAILED' ? 'badge-fail'
-                                  : j.status === 'RUNNING' ? 'badge-warn'
-                                    : 'badge-queued'
+                              : j.status === 'FAILED' ? 'badge-fail'
+                                : j.status === 'RUNNING' ? 'badge-warn'
+                                  : 'badge-queued'
                               }`}>
                               <StatusDot tone={tone} /> {j.status}
                             </span>
@@ -207,9 +214,10 @@ export default function HomePage() {
                 </div>
               );
             })}
-          </div>
+          </div>   
         )}
       </section>
+      <BatchExportDialog open={batchOpen} onClose={() => setBatchOpen(false)} />
     </main>
   );
 }
