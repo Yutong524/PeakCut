@@ -207,6 +207,26 @@ export default function HomePage() {
                           <div className="text-[10px] text-soft mt-2">
                             Job: {j.id}
                           </div>
+
+                          {j.type === 'RENDER' && j.status === 'SUCCEEDED' && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <a
+                                className="btn"
+                                href={`/api/videos/${j.videoId}/download?format=mp4`}
+                                title="Download rendered MP4"
+                              >
+                                Download MP4
+                              </a>
+                              <a
+                                className="btn"
+                                href={`/api/videos/${j.videoId}/download?format=webm`}
+                                title="Download rendered WEBM"
+                              >
+                                Download WEBM
+                              </a>
+                            </div>
+                          )}
+
                         </div>
                       );
                     })}
@@ -214,7 +234,7 @@ export default function HomePage() {
                 </div>
               );
             })}
-          </div>   
+          </div>
         )}
       </section>
       <BatchExportDialog open={batchOpen} onClose={() => setBatchOpen(false)} />

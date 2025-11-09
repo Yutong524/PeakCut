@@ -10,6 +10,7 @@ import HotkeysOverlay from '@/components/editor/HotkeysOverlay';
 import { clamp } from '@/lib/time';
 import { toast } from '@/components/editor/toast';
 import ExportDialog from '@/components/editor/ExportDialog';
+import RenderDialog from '@/components/editor/RenderDialog';
 
 async function fetchJSON(url, opt) {
     const res = await fetch(url, { cache: 'no-store', ...opt });
@@ -26,6 +27,7 @@ export default function EditorPage() {
     const [currentMs, setCurrentMs] = useState(0);
     const [duration, setDuration] = useState(0);
     const [exportOpen, setExportOpen] = useState(false);
+    const [renderOpen, setRenderOpen] = useState(false);
 
     useEffect(() => {
         (async () => {
@@ -195,6 +197,7 @@ export default function EditorPage() {
                     <button className="btn-primary" onClick={addAtPlayhead}>+ Add at Playhead</button>
                     <button className="btn-ghost" onClick={saveAll}>Save All</button>
                     <button className="btn-accent" onClick={() => setExportOpen(true)}>Export…</button>
+                    <button className="btn-accent" onClick={() => setRenderOpen(true)}>Render…</button>
                     <div className="ml-auto text-xs text-[#8fe86c]">Tips: Space Play/Pause · S Split · M Merge · ←/→ ±0.1s · Ctrl+S Save</div>
                 </div>
             </div>
@@ -230,8 +233,12 @@ export default function EditorPage() {
                 }
             />
             <HotkeysOverlay />
-            
+
             <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} videoId={videoId} />
+            <RenderDialog open={renderOpen} onClose={(submitted) => {
+                setRenderOpen(false);
+                if (submitted) alert('Render job started. Check Recent Jobs for progress.');
+            }} videoId={videoId} />
         </div>
     );
 }
