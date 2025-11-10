@@ -165,6 +165,11 @@ export default function HomePage() {
                     <div className="text-xs text-soft">
                       Video ID: <span className="text-[var(--acid-300)]">{vid}</span>
                     </div>
+                    <a href="/projects"
+                      className="px-3 py-2 rounded-md border border-[#345b2f] bg-[#101810] hover:bg-[#132013] text-[#caff6b] text-sm">
+
+                      Projects
+                    </a>
                     <a
                       href={`/editor?videoId=${vid}`}
                       className="btn"

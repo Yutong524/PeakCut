@@ -18,6 +18,31 @@ async function fetchJSON(url, opt) {
     return res.json();
 }
 
+async function saveEditorState(videoId, state) {
+    if (!videoId) return;
+    try {
+        await fetch(`/api/editor/state/${videoId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(state),
+        });
+    } catch (e) {
+        console.error('save editor state failed', e);
+    }
+}
+
+async function loadEditorState(videoId) {
+    if (!videoId) return null;
+    try {
+        const r = await fetch(`/api/editor/state/${videoId}`, { cache: 'no-store' });
+        if (!r.ok) return null;
+        const d = await r.json();
+        return d.state || null;
+    } catch {
+        return null;
+    }
+}
+
 export default function EditorPage() {
     const sp = useSearchParams();
     const videoId = sp.get('videoId');
@@ -41,6 +66,30 @@ export default function EditorPage() {
             }
         })();
     }, [videoId]);
+
+    useEffect(() => {
+        (async () => {
+            if (!videoId) return;
+            const state = await loadEditorState(videoId);
+            if (state) {
+                if (typeof state.currentMs === 'number')
+                    setCurrentMs(state.currentMs);
+                if (state.activeSegmentId)
+                    setActive(state.activeSegmentId);
+            }
+        })();
+    }, [videoId]);
+
+    useEffect(() => {
+        if (!videoId) return;
+        const timer = setInterval(() => {
+            saveEditorState(videoId, {
+                currentMs,
+                activeSegmentId: active
+            });
+        }, 2000);
+        return () => clearInterval(timer);
+    }, [videoId, currentMs, active]);
 
     const saveOne = useCallback(async (id, patch) => {
         const prev = segments;
