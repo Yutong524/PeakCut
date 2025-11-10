@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import BatchExportDialog from '@/components/editor/BatchExportDialog';
+import JobPanel from '@/components/jobs/JobPanel';
 
 const IconUpload = (props) => (
   <svg width="18" height="18" viewBox="0 0 24 24" {...props}>
@@ -69,6 +70,7 @@ export default function HomePage() {
 
   return (
     <main className="p-4 md:p-6 lg:p-8 space-y-8">
+      <JobPanel />
       <header className="card card-strong glow p-4 md:p-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="rounded-md p-2 glow" style={{ background: 'linear-gradient(180deg, rgba(36,52,16,.9), rgba(20,32,14,.85))', border: '1px solid rgba(158,240,26,.35)' }}>
