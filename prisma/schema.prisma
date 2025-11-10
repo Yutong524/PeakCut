@@ -59,6 +59,8 @@ model Job {
   metaJson  Json?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  logText   String? 
+  heartbeatAt  DateTime? 
 }
 
 model SubtitleSegment {
