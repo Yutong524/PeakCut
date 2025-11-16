@@ -1,21 +1,30 @@
 import './globals.css';
 
+import AppChrome from '@/components/layout/AppChrome';
+import { AuthProvider } from '@/components/auth/AuthProvider';
+
 export const metadata = {
-  title: 'AI Clipper',
-  description: 'Auto transcribe, cut, translate, and export shorts.'
+  title: 'PEAKCUT · Industrial Subtitle & Render Studio',
+  description:
+    'Project-based video subtitle editing, hard-sub rendering, and batch export with an industrial green–yellow UI.'
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <body className="bg-zinc-950 text-zinc-100 antialiased">
-        <div className="max-w-5xl mx-auto px-4 py-6">
-          <header className="flex items-center justify-between mb-6">
-            <h1 className="text-xl font-semibold tracking-tight">AI Clipper</h1>
-            <nav className="text-sm text-zinc-400">MVP</nav>
-          </header>
-          {children}
-        </div>
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className="
+          min-h-screen
+          antialiased
+          text-[var(--fg-0)]
+          bg-[var(--bg-0)]
+        "
+      >
+        <AuthProvider>
+          <AppChrome>
+            {children}
+          </AppChrome>
+        </AuthProvider>
       </body>
     </html>
   );

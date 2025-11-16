@@ -1,33 +1,53 @@
 generator client { 
   provider = "prisma-client-js" 
 }
-datasource db    { 
+
+datasource db { 
   provider = "sqlite"
-  url = env("DATABASE_URL") 
+  url      = env("DATABASE_URL") 
+}
+
+enum Role {
+  USER
+  ADMIN
 }
 
 model User {
   id        String   @id @default(cuid())
   email     String?  @unique
+  name      String?
+  image     String?
+  role      Role     @default(USER)
   createdAt DateTime @default(now())
-  jobs   Job[]   @relation("UserJobs")
-  videos Video[]
+  jobs    Job[]    @relation("UserJobs")
+  videos  Video[]
+  projects Project[]
+
+  accounts Account[]
+  sessions Session[]
+
+  @@index([email])
 }
 
 model Video {
-  id         String   @id @default(cuid())
-  userId     String?
-  user       User?    @relation(fields: [userId], references: [id])
-  original   String
-  durationMs Int?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  original    String
+  durationMs  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
   projectId   String?
   project     Project? @relation(fields: [projectId], references: [id])
 
-  jobs     Job[]               @relation("VideoJobs")
-  segments SubtitleSegment[]
+  jobs        Job[]               @relation("VideoJobs")
+  segments    SubtitleSegment[]
   editorState EditorState?
+
+  @@index([userId])
+  @@index([projectId])
 }
 
 enum JobType {
@@ -50,17 +70,22 @@ model Job {
   status    JobStatus @default(QUEUED)
   progress  Int       @default(0)
   error     String?
+
   userId String?
   user   User?  @relation("UserJobs", fields: [userId], references: [id])
 
   videoId String
   video   Video  @relation("VideoJobs", fields: [videoId], references: [id])
 
-  metaJson  Json?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  logText   String? 
-  heartbeatAt  DateTime? 
+  metaJson    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  logText     String?
+  heartbeatAt DateTime?
+
+  @@index([userId])
+  @@index([videoId])
+  @@index([status])
 }
 
 model SubtitleSegment {
@@ -76,16 +101,23 @@ model SubtitleSegment {
   textEn    String?
   speaker   String?
   createdAt DateTime @default(now())
+
+  @@index([videoId])
+  @@index([startMs])
 }
 
 model Project {
-  id           String         @id @default(cuid())
-  name         String
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId String?
+  user   User?  @relation(fields: [userId], references: [id])
 
   videos       Video[]
   editorStates EditorState[]
+
+  @@index([userId])
 }
 
 model EditorState {
@@ -99,6 +131,45 @@ model EditorState {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  video   Video   @relation(fields: [videoId], references: [id])
+  video   Video    @relation(fields: [videoId], references: [id])
   project Project? @relation(fields: [projectId], references: [id])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
 }
