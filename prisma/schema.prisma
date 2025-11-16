@@ -22,6 +22,7 @@ model User {
   jobs    Job[]    @relation("UserJobs")
   videos  Video[]
   projects Project[]
+  templates RenderTemplate[]
 
   accounts Account[]
   sessions Session[]
@@ -172,4 +173,34 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model RenderTemplate {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  name        String
+  description String?
+  width       Int?
+  height      Int?
+  aspectRatio String?
+
+  fontFamily  String  @default("Arial")
+  fontSize    Int     @default(18)
+
+  primaryColor String @default("#FFFFFF")
+  outlineColor String @default("#000000")
+  outlineSize  Int    @default(1)
+
+  bgColor   String  @default("#000000")
+  bgOpacity Float   @default(0.4)
+  position   String @default("bottom")
+
+  textAlign  String @default("center")
+  lineSpacing Int   @default(4)
+  maxLineWidth Int  @default(42)
+  burnLang   String @default("textSrc")
+  isDefault  Boolean @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
