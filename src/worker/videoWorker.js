@@ -9,97 +9,144 @@ import { ffmpeg } from '../lib/ffmpeg.js';
 import { renderedPath } from '../lib/storage.js';
 import { writeTempSrt } from '../lib/srt.js';
 
-const connection = {
-    url: process.env.REDIS_URL,
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-    retryStrategy(times) {
-        return Math.min(1000 * (2 ** times), 15000);
-    },
-};
-
+const connection = { url: process.env.REDIS_URL };
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const nowISO = () => new Date().toISOString();
-
-async function appendLog(jobId, message, level = 'info') {
-    const line = `[${nowISO()}] [${level.toUpperCase()}] ${message}\n`;
-    try {
-        await prisma.$executeRawUnsafe(
-            `UPDATE Job SET logText = COALESCE(logText, '') || ? WHERE id = ?`,
-            line,
-            jobId
-        );
-    } catch (e) {
-        try {
-            const j = await prisma.job.findUnique({
-                where: { id: jobId },
-                select: { logText: true }
-            });
-            await prisma.job.update({
-                where: { id: jobId },
-                data: { logText: (j?.logText || '') + line },
-            });
-        } catch (err) {
-            console.error('[appendLog] failed:', jobId, err);
-        }
-    }
-}
-
-async function beat(jobId, progress) {
-    try {
-        const data = { heartbeatAt: new Date() };
-        if (typeof progress === 'number') data.progress = progress;
-        await prisma.job.update({
-            where:
-                { id: jobId },
-            data
-        });
-    } catch (e) {
-        console.error('[beat] failed:', jobId, e);
-    }
-}
 
 async function setJobPatch(jobId, patch) {
     try {
-        await prisma.job.update({
-            where: { id: jobId },
-            data: { heartbeatAt: new Date(), ...patch },
-        });
+        await prisma.job.update({ where: { id: jobId }, data: patch });
     } catch (e) {
         console.error('[JobPatch] update failed:', jobId, patch, e);
     }
 }
 
-function startHeartbeat(jobId) {
-    const timer = setInterval(() => beat(jobId), 5000);
-    return () => clearInterval(timer);
+function hexToAss(color) {
+    if (!color) return '&H00FFFFFF&';
+    let c = color.trim();
+    if (c.startsWith('#')) c = c.slice(1);
+    if (c.length === 3) {
+        c = c.split('').map(ch => ch + ch).join('');
+    }
+    if (c.length !== 6) return '&H00FFFFFF&';
+    const r = c.slice(0, 2);
+    const g = c.slice(2, 4);
+    const b = c.slice(4, 6);
+    return `&H00${b}${g}${r}&`;
+}
+
+function resolveAlignment(position, textAlign) {
+    const pos = (position || 'bottom').toLowerCase();
+    const align = (textAlign || 'center').toLowerCase();
+
+    let baseRow = 2;
+    if (pos === 'top') baseRow = 1;
+    if (pos === 'bottom') baseRow = 3;
+
+    let col = 2;
+    if (align === 'left') col = 1;
+    if (align === 'right') col = 3;
+
+    return (baseRow - 1) * 3 + col;
+}
+
+function buildForceStyleFromTemplate(tpl) {
+    const font = tpl.fontFamily || 'Arial';
+    const fontSize = tpl.fontSize || 18;
+    const primary = hexToAss(tpl.primaryColor || '#FFFFFF');
+    const outline = tpl.outlineSize ?? 1;
+    const outlineColor = hexToAss(tpl.outlineColor || '#000000');
+    const bgColor = hexToAss(tpl.bgColor || '#000000');
+    const alignment = resolveAlignment(tpl.position, tpl.textAlign);
+    const lineSpacing = tpl.lineSpacing ?? 4;
+
+    const backAlpha = Math.round(clamp((1 - (tpl.bgOpacity ?? 0.4)) * 255, 0, 255));
+    const backAlphaHex = backAlpha.toString(16).padStart(2, '0').toUpperCase();
+    const backColour = bgColor.replace('&H00', `&H${backAlphaHex}`);
+
+    const parts = [
+        `Fontname=${font}`,
+        `Fontsize=${fontSize}`,
+        `PrimaryColour=${primary}`,
+        `OutlineColour=${outlineColor}`,
+        `Outline=${outline}`,
+        `BorderStyle=3`,
+        `BackColour=${backColour}`,
+        `Alignment=${alignment}`,
+        `MarginV=30`,
+        `Spacing=${lineSpacing}`
+    ];
+
+    return parts.join(',');
+}
+
+async function loadRenderTemplate(meta) {
+    const templateId = meta?.templateId;
+    if (!templateId) return null;
+    try {
+        const tpl = await prisma.renderTemplate.findUnique({
+            where: { id: templateId }
+        });
+        return tpl;
+    } catch (e) {
+        console.error('[RenderTemplate] load failed:', templateId, e);
+        return null;
+    }
+}
+
+async function appendJobLog(jobId, line) {
+    try {
+        const now = new Date();
+        const prefix = now.toISOString();
+        await prisma.job.update({
+            where: { id: jobId },
+            data: {
+                logText: {
+                    set: prisma.$executeRaw`SELECT COALESCE(logText, '') FROM Job WHERE id = ${jobId}`
+                }
+            }
+        });
+    } catch {
+        try {
+            const job = await prisma.job.findUnique({ where: { id: jobId } });
+            const prev = job?.logText || '';
+            const next = `${prev}${prev ? '\n' : ''}[${new Date().toISOString()}] ${line}`;
+            await prisma.job.update({
+                where: { id: jobId },
+                data: { logText: next }
+            });
+        } catch (e) {
+            console.error('[JobLog] append failed:', jobId, e);
+        }
+    }
+}
+
+async function setHeartbeat(jobId) {
+    try {
+        await prisma.job.update({
+            where: { id: jobId },
+            data: { heartbeatAt: new Date() }
+        });
+    } catch (e) {
+        console.error('[JobHeartbeat] failed:', jobId, e);
+    }
 }
 
 async function handleTranscribe(job, videoId) {
-    await setJobPatch(job.id, {
-        status: 'RUNNING',
-        progress: 1
-    });
-    const stop = startHeartbeat(job.id);
-    await appendLog(job.id, `TRANSCRIBE started for video ${videoId}`);
+    await setJobPatch(job.id, { status: 'RUNNING', progress: 1 });
+    await setHeartbeat(job.id);
+    await appendJobLog(job.id, 'TRANSCRIBE started');
 
     try {
-        const video = await prisma.video.findUnique({
-            where: { id: videoId }
-        });
-        if (!video?.original) {
-            await appendLog(job.id, 'Video not found or no original file', 'error');
-            throw new Error('Video not found or no original file');
-        }
+        const video = await prisma.video.findUnique({ where: { id: videoId } });
+        if (!video?.original) throw new Error('Video not found or no original file');
 
         await setJobPatch(job.id, { progress: 5 });
+        await appendJobLog(job.id, `Reading file: ${video.original}`);
 
-        await appendLog(job.id, `Invoking local ASR on: ${video.original}`);
         const { text, segments } = await transcribeLocal(video.original);
 
-        await appendLog(job.id, `Transcribe result: ${segments?.length || 0} segments`);
         await prisma.subtitleSegment.deleteMany({ where: { videoId } });
 
         if (segments?.length) {
@@ -107,7 +154,7 @@ async function handleTranscribe(job, videoId) {
                 videoId,
                 startMs: Math.max(0, Math.floor((s.start || 0) * 1000)),
                 endMs: Math.max(0, Math.floor((s.end || 0) * 1000)),
-                textSrc: s.text || '',
+                textSrc: s.text || ''
             }));
 
             const chunk = 200;
@@ -115,72 +162,67 @@ async function handleTranscribe(job, videoId) {
                 await prisma.subtitleSegment.createMany({ data: rows.slice(i, i + chunk) });
                 const prog = clamp(5 + Math.floor((i / rows.length) * 85), 5, 95);
                 await setJobPatch(job.id, { progress: prog });
-                if (i === 0 || i % (chunk * 3) === 0) {
-                    await appendLog(job.id, `Inserted ${Math.min(i + chunk, rows.length)}/${rows.length} segments`);
-                }
+                await setHeartbeat(job.id);
             }
         } else {
             await prisma.subtitleSegment.create({
-                data: { videoId, startMs: 0, endMs: 0, textSrc: text || '' },
+                data: { 
+                    videoId, 
+                    startMs: 0, 
+                    endMs: 0, 
+                    textSrc: text || '' 
+                }
             });
             await setJobPatch(job.id, { progress: 95 });
-            await appendLog(job.id, 'No segments detected, inserted 1 whole-line segment');
         }
 
-        await setJobPatch(job.id, {
-            status: 'SUCCEEDED',
-            progress: 100,
-            error: null
-        });
-        await appendLog(job.id, 'TRANSCRIBE succeeded', 'info');
+        await setJobPatch(job.id, { status: 'SUCCEEDED', progress: 100, error: null });
+        await setHeartbeat(job.id);
+        await appendJobLog(job.id, 'TRANSCRIBE finished');
     } catch (err) {
         console.error('TRANSCRIBE (local) failed:', err);
-        await appendLog(job.id, `TRANSCRIBE failed: ${err?.message || err}`, 'error');
-        await setJobPatch(job.id, {
-            status: 'FAILED',
-            error: String(err?.message || err)
-        });
+        await setJobPatch(job.id, { status: 'FAILED', error: String(err?.message || err) });
+        await setHeartbeat(job.id);
+        await appendJobLog(job.id, `TRANSCRIBE failed: ${String(err?.message || err)}`);
         throw err;
-    } finally {
-        stop();
     }
 }
 
 async function handleAutoCut(job, videoId) {
-    await setJobPatch(job.id, {
-        status: 'RUNNING',
-        progress: 1
-    });
-    const stop = startHeartbeat(job.id);
-    await appendLog(job.id, `AUTOCUT started for video ${videoId}`);
+    await setJobPatch(job.id, { status: 'RUNNING', progress: 1 });
+    await setHeartbeat(job.id);
+    await appendJobLog(job.id, 'AUTOCUT started');
 
     try {
         for (let i = 0; i <= 12; i++) {
             await sleep(200);
-            const p = clamp(5 + i * 7, 5, 95);
-            await setJobPatch(job.id, { progress: p });
-            if (i % 3 === 0) await appendLog(job.id, `AUTOCUT progress ~ ${p}%`);
+            await setJobPatch(job.id, { progress: clamp(5 + i * 7, 5, 95) });
+            await setHeartbeat(job.id);
         }
-        await setJobPatch(job.id, {
-            status: 'SUCCEEDED',
-            progress: 100,
-            error: null
+        await setJobPatch(job.id, { 
+            status: 'SUCCEEDED', 
+            progress: 100, 
+            error: null 
         });
-        await appendLog(job.id, 'AUTOCUT succeeded', 'info');
+        await appendJobLog(job.id, 'AUTOCUT finished');
     } catch (err) {
         console.error('AUTOCUT failed:', err);
-        await appendLog(job.id, `AUTOCUT failed: ${err?.message || err}`, 'error');
-        await setJobPatch(job.id, { status: 'FAILED', error: String(err?.message || err) });
+        await setJobPatch(job.id, { 
+            status: 'FAILED', 
+            error: String(err?.message || err) 
+        });
+        await appendJobLog(job.id, `AUTOCUT failed: ${String(err?.message || err)}`);
         throw err;
-    } finally {
-        stop();
     }
 }
 
 async function handleTranslate(job, videoId) {
-    await setJobPatch(job.id, { status: 'RUNNING', progress: 1 });
-    const stop = startHeartbeat(job.id);
-    await appendLog(job.id, `TRANSLATE started for video ${videoId}`);
+    await setJobPatch(job.id, { 
+        status: 'RUNNING', 
+        progress: 1 
+    });
+    await setHeartbeat(job.id);
+    await appendJobLog(job.id, 'TRANSLATE started');
 
     try {
         const segs = await prisma.subtitleSegment.findMany({ where: { videoId } });
@@ -190,100 +232,102 @@ async function handleTranslate(job, videoId) {
         for (const s of segs) {
             await prisma.subtitleSegment.update({
                 where: { id: s.id },
-                data: { textEn: s.textSrc, textZh: (s.textSrc || '') },
+                data: { textEn: s.textSrc, textZh: (s.textSrc || '') }
             });
             done++;
-            if (done % 50 === 0 || done === total) {
-                const p = clamp(5 + Math.floor((done / total) * 90), 5, 95);
-                await setJobPatch(job.id, { progress: p });
-                await appendLog(job.id, `TRANSLATE ${done}/${total} (${p}%)`);
+            if (done % 50 === 0) {
+                await setJobPatch(job.id, { 
+                    progress: clamp(5 + Math.floor(done / total * 90), 5, 95) 
+                });
+                await setHeartbeat(job.id);
             }
         }
 
-        await setJobPatch(job.id, {
-            status: 'SUCCEEDED',
-            progress: 100,
-            error: null
-        });
-        await appendLog(job.id, 'TRANSLATE succeeded', 'info');
+        await setJobPatch(job.id, { 
+            status: 'SUCCEEDED', 
+            progress: 100, 
+            error: null });
+        await appendJobLog(job.id, 'TRANSLATE finished');
     } catch (err) {
         console.error('TRANSLATE failed:', err);
-        await appendLog(job.id, `TRANSLATE failed: ${err?.message || err}`, 'error');
-        await setJobPatch(job.id, {
-            status: 'FAILED',
-            error: String(err?.message || err)
-        });
+        await setJobPatch(job.id, { status: 'FAILED', error: String(err?.message || err) });
+        await appendJobLog(job.id, `TRANSLATE failed: ${String(err?.message || err)}`);
         throw err;
-    } finally {
-        stop();
     }
 }
 
 async function handleRender(job, videoId, meta = {}) {
-    await setJobPatch(job.id, {
-        status: 'RUNNING',
-        progress: 1
-    });
-    const stop = startHeartbeat(job.id);
-    await appendLog(job.id, `RENDER started for video ${videoId}`);
+    await setJobPatch(job.id, { status: 'RUNNING', progress: 1 });
+    await setHeartbeat(job.id);
+    await appendJobLog(job.id, 'RENDER started');
 
     try {
-        const video = await prisma.video.findUnique({ where: { id: videoId } });
+        const video = await prisma.video.findUnique({
+            where: { id: videoId }
+        });
         if (!video?.original || !fs.existsSync(video.original)) {
-            await appendLog(job.id, 'Video file missing', 'error');
             await setJobPatch(job.id, { status: 'FAILED', error: 'video file missing' });
+            await appendJobLog(job.id, 'RENDER failed: video file missing');
             throw new Error('video file missing');
         }
 
         const segments = await prisma.subtitleSegment.findMany({
             where: { videoId },
-            orderBy: { startMs: 'asc' },
+            orderBy: { startMs: 'asc' }
         });
         if (!segments?.length) {
-            await appendLog(job.id, 'No subtitle segments to burn', 'error');
             await setJobPatch(job.id, { status: 'FAILED', error: 'no subtitle segments' });
+            await appendJobLog(job.id, 'RENDER failed: no subtitle segments');
             throw new Error('no subtitle segments');
+        }
+
+        const tpl = await loadRenderTemplate(meta);
+        if (tpl) {
+            await appendJobLog(job.id, `Using template: ${tpl.name} (${tpl.id})`);
+        } else {
+            await appendJobLog(job.id, 'No templateId provided, using default style');
         }
 
         const fmt = (meta?.format || process.env.RENDER_FORMAT || 'mp4').toLowerCase(); // mp4 | webm
         const crf = Number(meta?.crf ?? process.env.RENDER_CRF ?? (fmt === 'mp4' ? 23 : 32));
         const preset = String(meta?.preset ?? process.env.RENDER_PRESET ?? 'medium');
-        const lang = String(meta?.burnLang ?? process.env.RENDER_LANG ?? 'textSrc');
+        const burnLang = tpl?.burnLang || meta?.burnLang || process.env.RENDER_LANG || 'textSrc';
 
-        await appendLog(job.id, `Render params -> format=${fmt}, crf=${crf}, preset=${preset}, lang=${lang}`);
-
-        const srtFile = await writeTempSrt(segments, lang);
-        await appendLog(job.id, `SRT prepared at: ${srtFile}`);
+        const srtFile = await writeTempSrt(segments, burnLang);
 
         const outFile = renderedPath(videoId, fmt);
         try { fs.unlinkSync(outFile); } catch { }
+
         const esc = (p) => p.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
+
+        const forceStyle = tpl
+            ? buildForceStyleFromTemplate(tpl)
+            : 'Outline=1,BorderStyle=1,Fontsize=18';
 
         await new Promise((resolve, reject) => {
             let prog = 3;
 
             const cmd = ffmpeg(video.original)
-                .videoFilters(`subtitles='${esc(srtFile)}':force_style='Outline=1,BorderStyle=1,Fontsize=18'`)
+                .videoFilters(`subtitles='${esc(srtFile)}':force_style='${forceStyle}'`)
                 .on('start', (c) => {
-                    appendLog(job.id, `ffmpeg start: ${c}`);
+                    console.log('[ffmpeg] start:', c);
+                    appendJobLog(job.id, 'ffmpeg started');
                 })
-                .on('stderr', (line) => {
-                    if (typeof line === 'string' && line.trim()) {
-                        appendLog(job.id, line, 'debug').catch(() => { });
-                    }
-                })
-                .on('progress', async (info) => {
+                .on('progress', async () => {
                     prog = clamp(prog + 1, 3, 95);
                     await setJobPatch(job.id, { progress: prog });
+                    await setHeartbeat(job.id);
                 })
                 .on('error', async (err) => {
-                    await appendLog(job.id, `ffmpeg error: ${err?.message || err}`, 'error');
+                    console.error('[ffmpeg] error:', err);
                     await setJobPatch(job.id, { status: 'FAILED', error: String(err?.message || err) });
+                    await appendJobLog(job.id, `ffmpeg error: ${String(err?.message || err)}`);
                     reject(err);
                 })
                 .on('end', async () => {
                     await setJobPatch(job.id, { progress: 98 });
-                    await appendLog(job.id, 'ffmpeg finished');
+                    await setHeartbeat(job.id);
+                    await appendJobLog(job.id, 'ffmpeg finished');
                     resolve();
                 });
 
@@ -305,70 +349,75 @@ async function handleRender(job, videoId, meta = {}) {
         });
 
         await setJobPatch(job.id, { progress: 99 });
+
         await prisma.job.update({
             where: { id: job.id },
-            data: { metaJson: { ...(meta || {}), output: renderedPath(videoId, fmt) } },
+            data: {
+                metaJson: {
+                    ...(meta || {}),
+                    output: outFile,
+                    templateId: meta?.templateId || tpl?.id || null
+                }
+            }
         });
 
         await setJobPatch(job.id, {
             status: 'SUCCEEDED',
-            progress: 100, error: null
+            progress: 100,
+            error: null
         });
-        await appendLog(job.id, 'RENDER succeeded', 'info');
+        await setHeartbeat(job.id);
+        await appendJobLog(job.id, 'RENDER succeeded');
     } catch (err) {
         console.error('RENDER failed:', err);
-        await appendLog(job.id, `RENDER failed: ${err?.message || err}`, 'error');
         await setJobPatch(job.id, {
             status: 'FAILED',
             error: String(err?.message || err)
         });
+        await setHeartbeat(job.id);
+        await appendJobLog(job.id, `RENDER failed: ${String(err?.message || err)}`);
         throw err;
-    } finally {
-        stop();
     }
 }
 
-const w = new Worker(
-    'video-jobs',
-    async (job) => {
-        const { videoId, type, meta } = job.data || {};
-        if (!videoId || !type) {
-            await appendLog(job.id, 'invalid job payload', 'error');
-            await setJobPatch(job.id, { status: 'FAILED', error: 'invalid job payload' });
-            throw new Error('invalid job payload');
-        }
+const w = new Worker('video-jobs', async (job) => {
+    const { videoId, type, meta } = job.data || {};
+    if (!videoId || !type) {
+        await setJobPatch(job.id, {
+            status: 'FAILED',
+            error: 'invalid job payload'
+        });
+        throw new Error('invalid job payload');
+    }
 
-        await appendLog(job.id, `Received job: ${type} for video ${videoId}`);
+    if (type === 'TRANSCRIBE') {
+        await handleTranscribe(job, videoId);
+        return;
+    }
 
-        if (type === 'TRANSCRIBE') {
-            await handleTranscribe(job, videoId); return;
-        }
-        if (type === 'AUTOCUT') {
-            await handleAutoCut(job, videoId); return;
-        }
-        if (type === 'TRANSLATE') {
-            await handleTranslate(job, videoId); return;
-        }
-        if (type === 'RENDER') {
-            await handleRender(job, videoId, meta); return;
-        }
+    if (type === 'AUTOCUT') {
+        await handleAutoCut(job, videoId);
+        return;
+    }
 
-        await setJobPatch(job.id, { status: 'SUCCEEDED', progress: 100, error: null });
-        await appendLog(job.id, `No-op job type: ${type} -> marked succeeded`);
-    },
-    { connection, concurrency: 2 }
-);
+    if (type === 'TRANSLATE') {
+        await handleTranslate(job, videoId);
+        return;
+    }
 
-w.on('completed', async (job) => {
-    console.log('Completed', job.name, job.id);
-    await appendLog(job.id, 'Worker event: completed');
-});
-w.on('failed', async (job, err) => {
-    console.error('Failed', job?.name, job?.id, err);
-    if (job?.id) await appendLog(job.id, `Worker event: failed -> ${err?.message || err}`, 'error');
-});
-w.on('error', (err) => {
-    console.error('[Worker Redis Error]', err?.message || err);
-});
+    if (type === 'RENDER') {
+        await handleRender(job, videoId, meta);
+        return;
+    }
+
+    await setJobPatch(job.id, {
+        status: 'SUCCEEDED',
+        progress: 100,
+        error: null
+    });
+}, { connection });
+
+w.on('completed', (job) => console.log('Completed', job.name, job.id));
+w.on('failed', (job, err) => console.error('Failed', job?.name, job?.id, err));
 
 export { w };
