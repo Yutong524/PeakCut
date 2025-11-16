@@ -1,44 +1,53 @@
 'use client';
+
 import { signIn } from 'next-auth/react';
 
 export default function SignInPage() {
-    const providers = [
-        { id: 'github', label: 'Sign in with GitHub' },
-        { id: 'google', label: 'Sign in with Google' },
-        { id: 'email', label: 'Magic Link (Email)' }
-    ];
-
-    async function doSignIn(id) {
-        if (id === 'email') {
-            const email = prompt('Enter your email for a magic link:');
-            if (!email) return;
-            await signIn('email', { email, callbackUrl: '/' });
-            return;
-        }
-        await signIn(id, { callbackUrl: '/' });
-    }
-
     return (
-        <div className="min-h-screen grid place-items-center p-6">
-            <div className="card card-strong glow p-6 w-full max-w-md space-y-5">
-                <div className="brand-chip w-fit">
-                    <span className="brand-dot" />
-                    <strong>PEAKCUT</strong>
+        <main className="flex items-center justify-center min-h-[calc(100vh-80px)] px-4">
+            <div className="card card-strong glow max-w-md w-full p-6 space-y-5">
+                <div>
+                    <h1
+                        className="text-lg font-semibold mb-1"
+                        style={{ color: 'var(--acid-300)' }}
+                    >
+                        Sign in to Peakcut
+                    </h1>
+                    <p className="text-soft text-xs">
+                        Use your email magic link or OAuth provider. Your projects and
+                        videos will be kept under your account.
+                    </p>
                 </div>
-                <h1 className="text-xl" style={{ color: 'var(--acid-200)' }}>Sign in to continue</h1>
 
-                <div className="grid gap-2">
-                    {providers.map(p => (
-                        <button key={p.id} className="btn btn-primary justify-center" onClick={() => doSignIn(p.id)}>
-                            {p.label}
-                        </button>
-                    ))}
+                <div className="space-y-3">
+                    <button
+                        className="btn btn-primary w-full"
+                        onClick={() => signIn('email')}
+                    >
+                        Continue with email link
+                    </button>
+
+                    <div className="hr my-2" />
+
+                    <button
+                        className="btn w-full"
+                        onClick={() => signIn('github')}
+                    >
+                        Continue with GitHub
+                    </button>
+                    <button
+                        className="btn w-full"
+                        onClick={() => signIn('google')}
+                    >
+                        Continue with Google
+                    </button>
                 </div>
 
-                <p className="text-xs text-[var(--fg-2)]">
-                    By continuing, you agree to our Terms and acknowledge our Privacy Policy.
+                <p className="text-[10px] text-soft">
+                    Once signed in, all projects, jobs, and videos will be tied to your
+                    user ID for isolation and future billing.
                 </p>
             </div>
-        </div>
+        </main>
     );
 }
